@@ -22,8 +22,16 @@ with F5, just like on the Apple II with [YANC](https://github.com/udiweinstein/Y
 
 ![icon](Icon/AppIcon.png)
 
+## What's new
+**1.1.0**
+- DOS 3.3 support: open, browse, copy to and from, delete and rename on 140K DOS 3.3 disks; create blank DOS 3.3 data disks
+- File › Make Bootable (Cmd-B): turns a ProDOS image into a bootable disk
+- File menu: New Disk Image (Cmd-N) and Make Bootable (Cmd-B)
+
+**1.0.0** – first release: ProDOS images, two panels, copy/move/rename/delete/mkdir, view, new images, update check
+
 ## Download
-Get the latest `YANC for Mac.zip` from [Releases](https://github.com/udiweinstein/yancformac/releases/latest),
+Get the latest zip from [Releases](https://github.com/udiweinstein/yancformac/releases/latest),
 unzip it and move **YANC for Mac** to Applications.
 
 The app is not notarized, so on first launch right-click it and choose **Open** (or run
@@ -37,7 +45,7 @@ macOS 14 or newer with the Swift 5.9+ command-line tools (`xcode-select --instal
 
 ## Build and run
 ```
-swift run SelfTest  # runs the ProDOS engine tests (no Xcode needed)
+swift run SelfTest  # runs the ProDOS and DOS 3.3 engine tests (no Xcode needed)
 swift run YANCMac   # starts the app from the terminal
 ./make-app.sh       # builds "YANC for Mac.app" (version from the VERSION file, icon from Icon/AppIcon.png)
 ```
@@ -55,7 +63,7 @@ Or open `Package.swift` in Xcode and press Run.
 | F1 Help · F3 View · F5 Copy · F6 Move/Rename · F7 Mkdir · F8 Delete · F9 New image · F10 Quit | also the digit keys 1–0 |
 
 ## Structure
-- `Sources/ProDOSKit` – the ProDOS engine (no UI): block access for ProDOS/DOS order and 2IMG,
+- `Sources/ProDOSKit` – the disk engines (no UI): ProDOS and DOS 3.3,: block access for ProDOS/DOS order and 2IMG,
   directories, seedling/sapling/tree files, bitmap allocation
 - `Sources/YANCMac` – the SwiftUI app
 - `Sources/SelfTest` – engine tests (a plain program, works with the Command Line Tools alone)
