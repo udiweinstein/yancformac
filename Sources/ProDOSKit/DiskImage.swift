@@ -122,6 +122,27 @@ public final class DiskImage {
         return blk[4] >> 4 == 0xF && blk[4 + 0x1F] == 0x27 && blk[4 + 0x20] == 0x0D
     }
 
+    /// ProDOS-order image: DOS 3.3 sector -> physical position within the track.
+    static let dosToProdos: [Int] = (0..<16).map { s in prodosToDos.firstIndex(of: s)! }
+
+    private func sectorOffset(_ track: Int, _ sector: Int) -> Int {
+        dosOrder ? dataOffset + (track * 16 + sector) * 256
+                 : dataOffset + track * 4096 + DiskImage.dosToProdos[sector] * 256
+    }
+
+    /// 256-byte DOS 3.3 sector (track 0-34, sector 0-15).
+    public func readSector(_ track: Int, _ sector: Int) -> [UInt8] {
+        precondition(track >= 0 && track < blockCount / 8 && sector >= 0 && sector < 16, "T\(track) S\(sector) out of range")
+        let o = sectorOffset(track, sector)
+        return Array(bytes[o..<o + 256])
+    }
+
+    public func writeSector(_ track: Int, _ sector: Int, _ data: [UInt8]) {
+        precondition(track >= 0 && track < blockCount / 8 && sector >= 0 && sector < 16 && data.count == 256)
+        let o = sectorOffset(track, sector)
+        bytes.replaceSubrange(o..<o + 256, with: data)
+    }
+
     public func readBlock(_ n: Int) -> [UInt8] {
         precondition(n >= 0 && n < blockCount, "block \(n) out of range")
         let (a, b) = DiskImage.halfOffsets(n, off: dataOffset, dos: dosOrder)

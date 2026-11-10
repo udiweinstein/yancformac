@@ -1,7 +1,7 @@
 # YANC for Mac
 
 A Norton Commander style, two-panel file manager for macOS that reads and writes
-**ProDOS disk images**: `.po`, `.hdv`, `.2mg`, and `.dsk` / `.do` (DOS 3.3 sector order).
+Apple II disk images: **ProDOS** (`.po`, `.hdv`, `.2mg`, `.dsk`, `.do`) and **DOS 3.3** (140K `.dsk` / `.do` / `.po`).
 Each panel shows either a Mac folder or the inside of a disk image – copy files between them
 with F5, just like on the Apple II with [YANC](https://github.com/udiweinstein/YANC).
 
@@ -10,7 +10,11 @@ with F5, just like on the Apple II with [YANC](https://github.com/udiweinstein/Y
 - Browse subdirectories inside images; Return on an image opens it
 - Copy (F5), move / rename (F6), make directory (F7), delete (F8) – recursive for directories
 - View files (F3): Apple II text or a hex dump
-- Create blank ProDOS images (F9): 140K, 800K or 32 MB
+- Create blank images (File › New Disk Image, Cmd-N, or F9): ProDOS 140K, 800K or 32 MB, or a DOS 3.3 140K data disk
+- **Make a ProDOS image bootable** (File › Make Bootable, Cmd-B): with a bootable ProDOS disk
+  (e.g. the ProDOS 2.4.3 disk from prodos8.com) open in the other panel, it copies the boot blocks,
+  `PRODOS` and – if the target has none – the first `.SYSTEM` program. Works for floppies and 32 MB hard disk images.
+- DOS 3.3 files convert on copy: B ↔ BIN (load address kept as aux type), A ↔ BAS, I ↔ INT, T ↔ TXT
 - File types are kept: files copied to the Mac get a CiderPress-style suffix
   (`PRODOS#FF2000` = type `$FF`, aux `$2000`), which is used again when copying back.
   Plain Mac files get a type from their extension (`.txt` → TXT with LF→CR, `.bas`, `.sys`, otherwise BIN).
@@ -57,8 +61,8 @@ Or open `Package.swift` in Xcode and press Run.
 - `Sources/SelfTest` – engine tests (a plain program, works with the Command Line Tools alone)
 
 ## Limits
-ProDOS volumes only (no DOS 3.3 or Pascal file systems); extended (forked) files are read
-as their data fork only; nibble images are not supported.
+ProDOS and DOS 3.3 only (no Pascal, CP/M or HFS); extended (forked) files are read
+as their data fork only; nibble images (.nib, .woz) are not supported; DOS 3.3 on 140K disks only.
 
 ## Releasing a new version
 1. Bump the number in `VERSION` (and `fallbackVersion` in `Sources/YANCMac/UpdateChecker.swift`).

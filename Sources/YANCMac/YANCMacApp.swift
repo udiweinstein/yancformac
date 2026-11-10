@@ -4,15 +4,22 @@ import SwiftUI
 @main
 struct YANCMacApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    @StateObject private var cmd = Commander()
 
     var body: some Scene {
         WindowGroup("YANC for Mac") {
-            ContentView()
+            ContentView(cmd: cmd)
                 .frame(minWidth: 1000, minHeight: 600)
         }
         .commands {
             CommandGroup(after: .appInfo) {
                 Button("Check for Updates…") { UpdateChecker.check() }
+            }
+            CommandGroup(replacing: .newItem) {
+                Button("New Disk Image…") { cmd.newImage() }
+                    .keyboardShortcut("n")
+                Button("Make Bootable…") { cmd.makeBootable() }
+                    .keyboardShortcut("b")
             }
         }
     }

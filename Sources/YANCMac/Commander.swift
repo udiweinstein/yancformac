@@ -32,10 +32,10 @@ struct Panel {
 
 final class ImageSession {
     let url: URL
-    let volume: ProDOSVolume
+    let volume: DiskVolume
     init(url: URL) throws {
         self.url = url
-        volume = try ProDOSVolume(url: url)
+        volume = try DiskVolumes.open(url)
     }
 }
 
@@ -45,6 +45,7 @@ enum Dialog {
     case overwrite(count: Int, action: (Bool) -> Void)
     case newImage(action: (String, Int) -> Void)
     case view(title: String, text: String)
+    case message(title: String, text: String)
     case help
 }
 
@@ -144,9 +145,9 @@ final class Commander: ObservableObject {
             let vol = try session(url).volume
             var dirs: [Item] = []
             var files: [Item] = []
-            for e in try vol.entries(path) {
-                let it = Item(name: e.name, kind: e.isDirectory ? .folder : .file, size: Int64(e.eof),
-                              typeText: ProDOSFileType.name(e.fileType), date: e.modified, locked: e.isLocked,
+            for e in try vol.list(path) {
+                let it = Item(name: e.name, kind: e.isDirectory ? .folder : .file, size: Int64(e.size),
+                              typeText: e.typeText, date: e.modified, locked: e.locked,
                               fileType: e.fileType, auxType: e.auxType)
                 if e.isDirectory { dirs.append(it) } else { files.append(it) }
             }
@@ -163,7 +164,7 @@ final class Commander: ObservableObject {
             let home = fm.homeDirectoryForCurrentUser.path
             return url.path.hasPrefix(home) ? "~" + url.path.dropFirst(home.count) : url.path
         case .image(let url, let path):
-            let vol = sessions[url.standardizedFileURL]?.volume.volumeName ?? "?"
+            let vol = sessions[url.standardizedFileURL]?.volume.displayName ?? "?"
             return url.lastPathComponent + "  /" + ([vol] + path).joined(separator: "/")
         }
     }
@@ -178,7 +179,7 @@ final class Commander: ObservableObject {
             return ByteCountFormatter.string(fromByteCount: free, countStyle: .file) + " free"
         case .image(let url, _):
             guard let v = sessions[url.standardizedFileURL]?.volume else { return "" }
-            return "\(v.freeBlockCount()) of \(v.totalBlocks) blocks free"
+            return v.formatName + "  –  " + v.freeSpaceText()
         }
     }
 
@@ -315,10 +316,14 @@ final class Commander: ObservableObject {
 
     private func targetName(_ it: Item, from: Location, to: Location) -> String {
         switch (from, to) {
-        case (.mac, .image):
-            return ProDOSVolume.sanitizedName(TypeSuffix.parse(it.name).name)
+        case (.mac, .image(let u, _)):
+            let base = TypeSuffix.parse(it.name).name
+            return (try? session(u).volume.legalName(base)) ?? base
+        case (.image, .image(let u, _)):
+            return (try? session(u).volume.legalName(it.name)) ?? it.name
         case (.image, .mac):
-            return it.kind == .folder ? it.name : TypeSuffix.make(name: it.name, type: it.fileType, aux: it.auxType)
+            return it.kind == .folder ? Commander.macName(it.name)
+                : TypeSuffix.make(name: Commander.macName(it.name), type: it.fileType, aux: it.auxType)
         default:
             return it.name
         }
@@ -327,7 +332,7 @@ final class Commander: ObservableObject {
     private func exists(_ name: String, in loc: Location) -> Bool {
         switch loc {
         case .mac(let u): return fm.fileExists(atPath: u.appendingPathComponent(name).path)
-        case .image(let u, let p): return ((try? session(u).volume.entry(p, name)) ?? nil) != nil
+        case .image(let u, let p): return ((try? session(u).volume.lookup(p, name)) ?? nil) != nil
         }
     }
 
@@ -399,15 +404,16 @@ final class Commander: ObservableObject {
         var isDir: ObjCBool = false
         _ = fm.fileExists(atPath: url.path, isDirectory: &isDir)
         let parsed = TypeSuffix.parse(url.lastPathComponent)
-        let name = ProDOSVolume.sanitizedName(parsed.name)
+        let name = vol.legalName(parsed.name)
         if isDir.boolValue {
-            if try vol.entry(p, name) == nil { try vol.createDirectory(p, name: name) }
+            guard vol.supportsDirectories else { throw ProDOSError.unsupported("\(vol.formatName) disks have no directories") }
+            if try vol.lookup(p, name) == nil { try vol.makeDirectory(p, name: name) }
             for child in try fm.contentsOfDirectory(at: url, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]) {
                 try importMac(child, into: u, path: p + [name], overwrite: overwrite, touched: &touched)
             }
             return
         }
-        if try vol.entry(p, name) != nil && !overwrite { return }
+        if try vol.lookup(p, name) != nil && !overwrite { return }
         let data = try Data(contentsOf: url)
         let guess = ProDOSFileType.guess(fromExtension: (parsed.name as NSString).pathExtension)
         let type = parsed.type ?? guess.type
@@ -421,26 +427,27 @@ final class Commander: ObservableObject {
                 let e = ProDOSDate.encode(d)
                 return (e.date, e.time)
             }
-        try vol.writeFile(p, name: name, data: payload, fileType: type, auxType: aux, modified: mod, overwrite: overwrite)
+        try vol.write(p, name: name, contents: FileContents(data: payload, fileType: type, auxType: aux, modified: mod),
+                      overwrite: overwrite)
     }
 
     private func exportImage(_ u: URL, _ p: [String], _ name: String, to d: URL, overwrite: Bool) throws {
         let vol = try session(u).volume
-        guard let e = try vol.entry(p, name) else { throw ProDOSError.fileNotFound(name) }
+        guard let e = try vol.lookup(p, name) else { throw ProDOSError.fileNotFound(name) }
         if e.isDirectory {
-            let target = d.appendingPathComponent(e.name)
+            let target = d.appendingPathComponent(Commander.macName(e.name))
             try fm.createDirectory(at: target, withIntermediateDirectories: true)
-            for c in try vol.entries(p + [e.name]) {
+            for c in try vol.list(p + [e.name]) {
                 try exportImage(u, p + [e.name], c.name, to: target, overwrite: overwrite)
             }
             return
         }
-        let target = d.appendingPathComponent(TypeSuffix.make(name: e.name, type: e.fileType, aux: e.auxType))
+        let target = d.appendingPathComponent(TypeSuffix.make(name: Commander.macName(e.name), type: e.fileType, aux: e.auxType))
         if fm.fileExists(atPath: target.path) {
             guard overwrite else { return }
             try fm.removeItem(at: target)
         }
-        try vol.readFile(e).write(to: target)
+        try vol.read(p, e.name).data.write(to: target)
         if let m = e.modified { try? fm.setAttributes([.modificationDate: m], ofItemAtPath: target.path) }
     }
 
@@ -449,18 +456,18 @@ final class Commander: ObservableObject {
         let sv = try session(su).volume
         let dv = try session(du).volume
         touched.insert(du.standardizedFileURL)
-        guard let e = try sv.entry(sp, name) else { throw ProDOSError.fileNotFound(name) }
+        guard let e = try sv.lookup(sp, name) else { throw ProDOSError.fileNotFound(name) }
+        let dn = dv.legalName(e.name)
         if e.isDirectory {
-            let dn = e.name.uppercased()
-            if try dv.entry(dp, dn) == nil { try dv.createDirectory(dp, name: dn) }
-            for c in try sv.entries(sp + [e.name]) {
+            guard dv.supportsDirectories else { throw ProDOSError.unsupported("\(dv.formatName) disks have no directories") }
+            if try dv.lookup(dp, dn) == nil { try dv.makeDirectory(dp, name: dn) }
+            for c in try sv.list(sp + [e.name]) {
                 try copyImageToImage(su, sp + [e.name], c.name, du, dp + [dn], overwrite: overwrite, touched: &touched)
             }
             return
         }
-        if try dv.entry(dp, e.name) != nil && !overwrite { return }
-        try dv.writeFile(dp, name: e.name, data: sv.readFile(e), fileType: e.fileType, auxType: e.auxType,
-                         access: e.access, created: e.createdRaw, modified: e.modifiedRaw, overwrite: overwrite)
+        if try dv.lookup(dp, dn) != nil && !overwrite { return }
+        try dv.write(dp, name: dn, contents: sv.read(sp, e.name), overwrite: overwrite)
     }
 
     // MARK: Delete (F8)
@@ -501,12 +508,17 @@ final class Commander: ObservableObject {
         }
     }
 
-    private func deleteInImage(_ vol: ProDOSVolume, _ p: [String], _ name: String) throws {
-        guard let e = try vol.entry(p, name) else { throw ProDOSError.fileNotFound(name) }
+    private func deleteInImage(_ vol: DiskVolume, _ p: [String], _ name: String) throws {
+        guard let e = try vol.lookup(p, name) else { throw ProDOSError.fileNotFound(name) }
         if e.isDirectory {
-            for c in try vol.entries(p + [e.name]) { try deleteInImage(vol, p + [e.name], c.name) }
+            for c in try vol.list(p + [e.name]) { try deleteInImage(vol, p + [e.name], c.name) }
         }
-        try vol.delete(p, name: e.name, force: true)
+        try vol.remove(p, name: e.name)
+    }
+
+    /// Apple II names may contain characters a Mac file name can't.
+    static func macName(_ s: String) -> String {
+        s.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
     }
 
     // MARK: Rename (F6 -> Rename…), mkdir (F7), new image (F9)
@@ -525,7 +537,7 @@ final class Commander: ObservableObject {
                     self.reload(self.active, select: newName)
                 case .image(let u, let p):
                     let vol = try self.session(u).volume
-                    try vol.rename(p, from: it.name, to: newName)
+                    try vol.renameFile(p, from: it.name, to: newName)
                     try vol.save()
                     self.reloadAll()
                     self.reload(self.active, select: newName.uppercased())
@@ -548,7 +560,7 @@ final class Commander: ObservableObject {
                     self.reload(self.active, select: name)
                 case .image(let u, let p):
                     let vol = try self.session(u).volume
-                    try vol.createDirectory(p, name: name)
+                    try vol.makeDirectory(p, name: name)
                     try vol.save()
                     self.reloadAll()
                     self.reload(self.active, select: name.uppercased())
@@ -567,16 +579,71 @@ final class Commander: ObservableObject {
         dialog = .newImage { [weak self] name, blocks in
             guard let self else { return }
             do {
-                let vname = try ProDOSVolume.validName(name)
-                let url = folder.appendingPathComponent(vname + ".po")
+                let url: URL
+                let data: Data
+                if blocks < 0 {                                   // DOS 3.3 data disk
+                    let fname = Commander.macName(name.isEmpty ? "NEWDISK" : name)
+                    url = folder.appendingPathComponent(fname + ".dsk")
+                    data = DOS33Volume.blankImage()
+                } else {
+                    let vname = try ProDOSVolume.validName(name)
+                    url = folder.appendingPathComponent(vname + ".po")
+                    data = try ProDOSVolume.blankImage(volumeName: vname, blocks: blocks)
+                }
                 guard !self.fm.fileExists(atPath: url.path) else { throw ProDOSError.duplicateName(url.lastPathComponent) }
-                try ProDOSVolume.blankImage(volumeName: vname, blocks: blocks).write(to: url)
+                try data.write(to: url)
                 self.reloadAll()
                 self.reload(self.active, select: url.lastPathComponent)
             } catch {
                 self.alert = error.localizedDescription
             }
         }
+    }
+
+    // MARK: Make bootable
+
+    /// Copies boot blocks, PRODOS and (if missing) a .SYSTEM program from the
+    /// bootable ProDOS disk in the other panel to the disk in the active panel.
+    func makeBootable() {
+        guard case .image(let tu, _) = panels[active].location,
+              let target = try? session(tu).volume as? ProDOSVolume else {
+            alert = "Open the ProDOS disk image you want to make bootable in the active panel first."
+            return
+        }
+        guard case .image(let su, _) = panels[1 - active].location,
+              let source = try? session(su).volume as? ProDOSVolume, source.hasBootBlocks,
+              (try? source.entry([], "PRODOS")) ?? nil != nil else {
+            alert = "Open a bootable ProDOS disk (with PRODOS on it, e.g. the ProDOS 2.4.3 disk) in the other panel."
+            return
+        }
+        guard su != tu else { alert = "Choose two different disk images."; return }
+        let sourceSystem = (try? source.firstSystemFile()) ?? nil
+        let targetSystem = (try? target.firstSystemFile()) ?? nil
+        var steps = "• boot blocks (0 and 1)\n• PRODOS"
+        if targetSystem == nil, let s = sourceSystem { steps += "\n• \(s)" }
+        dialog = .confirm(title: "Make Bootable",
+                          message: "Copy to \(target.volumeName) from \(source.volumeName):\n\(steps)",
+                          ok: "Make Bootable", action: { [weak self] in
+            guard let self else { return }
+            do {
+                try target.copyBootBlocks(from: source)
+                try target.write([], name: "PRODOS", contents: source.read([], "PRODOS"), overwrite: true)
+                var system = targetSystem
+                if system == nil, let s = sourceSystem {
+                    try target.write([], name: s, contents: source.read([], s), overwrite: true)
+                    system = s
+                }
+                try target.save()
+                self.reloadAll()
+                var text = "\(target.volumeName) is now bootable."
+                if let system { text += "\nProDOS will start \(system)." }
+                else { text += "\nCopy a .SYSTEM program (e.g. BASIC.SYSTEM) onto it so ProDOS has something to run." }
+                self.dialog = .message(title: "Make Bootable", text: text)
+            } catch {
+                self.reloadAll()
+                self.alert = error.localizedDescription
+            }
+        }, alt: nil)
     }
 
     // MARK: View (F3)
@@ -591,9 +658,7 @@ final class Commander: ObservableObject {
                 data = h.readData(ofLength: 256 * 1024)
                 try? h.close()
             case .image(let u, let p):
-                let vol = try session(u).volume
-                guard let e = try vol.entry(p, it.name) else { throw ProDOSError.fileNotFound(it.name) }
-                data = try vol.readFile(e)
+                data = try session(u).volume.read(p, it.name).data
             }
             dialog = .view(title: it.name, text: Commander.render(data, appleText: it.fileType == 0x04))
         } catch {

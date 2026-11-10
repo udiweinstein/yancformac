@@ -24,8 +24,12 @@ enum NC {
 // MARK: - Main window
 
 struct ContentView: View {
-    @StateObject private var cmd = Commander()
+    @ObservedObject var cmd: Commander
     @State private var monitor: Any?
+
+    init(cmd: Commander) {
+        self.cmd = cmd
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -304,6 +308,12 @@ struct DialogView: View {
                     .keyboardShortcut(.cancelAction)
             }
             .padding(30)
+        case let .message(title, text):
+            NCBox(title: title) {
+                Text(text).font(NC.font).foregroundColor(.black).multilineTextAlignment(.leading)
+                NCButton(label: "OK") { cmd.dialog = nil }
+                    .keyboardShortcut(.defaultAction)
+            }
         case .help:
             NCBox(title: "YANC for Mac – Help") {
                 Text(helpText).font(NC.font).foregroundColor(.black).frame(alignment: .leading)
@@ -316,7 +326,7 @@ struct DialogView: View {
     var helpText: String {
         """
         Left panel / right panel: a Mac folder or the inside of a ProDOS
-        disk image (.po .hdv .2mg .dsk .do). Return on an image opens it.
+        or DOS 3.3 disk image (.po .hdv .2mg .dsk .do). Return opens it.
 
         Arrows        move           Tab           other panel
         PgUp/PgDn     page           Return        enter / open
@@ -326,7 +336,12 @@ struct DialogView: View {
         Typing        jump to name
 
         F1/1 Help   F3/3 View   F5/5 Copy   F6/6 Move or rename
-        F7/7 Mkdir  F8/8 Delete  F9/9 New blank .po image   F10/0 Quit
+        F7/7 Mkdir  F8/8 Delete  F9/9 New blank disk image  F10/0 Quit
+
+        File > New Disk Image (Cmd-N) creates a blank disk. To make a ProDOS disk
+        bootable, open a bootable ProDOS disk in the other panel and choose
+        File > Make Bootable (Cmd-B): it copies the boot blocks, PRODOS and a
+        .SYSTEM program.
 
         Files copied to the Mac keep their ProDOS type in the name,
         e.g. PRODOS#FF2000 (CiderPress style). Files copied back use it.
@@ -384,7 +399,7 @@ struct NewImageDialog: View {
     @FocusState private var focused: Bool
 
     var body: some View {
-        NCBox(title: "New blank ProDOS image") {
+        NCBox(title: "New blank disk image") {
             HStack {
                 Text("Volume name:").font(NC.font).foregroundColor(.black)
                 TextField("", text: $name)
@@ -399,11 +414,12 @@ struct NewImageDialog: View {
                 Text("140K (5.25\")").tag(280)
                 Text("800K (3.5\")").tag(1600)
                 Text("32 MB (hard disk)").tag(65535)
+                Text("140K DOS 3.3 (.dsk)").tag(-1)
             }
             .pickerStyle(.radioGroup)
             .font(NC.font)
             .foregroundColor(.black)
-            Text("The image is not bootable until PRODOS is copied onto it.")
+            Text("New disks are empty. Use File > Make Bootable to add a ProDOS boot loader.")
                 .font(NC.font).foregroundColor(.black)
             HStack(spacing: 14) {
                 NCButton(label: "Create") {

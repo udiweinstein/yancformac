@@ -5,7 +5,7 @@ import Foundation
 @MainActor
 enum UpdateChecker {
     nonisolated static let repo = "udiweinstein/yancformac"
-    static let fallbackVersion = "1.0.0"          // used when run with `swift run` (no app bundle)
+    static let fallbackVersion = "1.1.0"          // used when run with `swift run` (no app bundle)
 
     static var currentVersion: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? fallbackVersion

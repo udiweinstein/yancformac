@@ -569,6 +569,23 @@ public final class ProDOSVolume {
         image.writeBlock(e.block, b)
     }
 
+    // MARK: Boot blocks
+
+    /// True when block 0 holds a ProDOS boot loader (it starts with $01).
+    public var hasBootBlocks: Bool { image.readBlock(0)[0] == 0x01 }
+
+    /// Copies the boot loader (blocks 0 and 1) from another, bootable ProDOS volume.
+    public func copyBootBlocks(from source: ProDOSVolume) throws {
+        guard source.hasBootBlocks else { throw ProDOSError.unsupported("the source disk has no boot blocks") }
+        image.writeBlock(0, source.image.readBlock(0))
+        image.writeBlock(1, source.image.readBlock(1))
+    }
+
+    /// The first SYS file whose name ends in .SYSTEM, in directory order (what ProDOS starts).
+    public func firstSystemFile() throws -> String? {
+        try entries([]).first { $0.fileType == 0xFF && $0.name.uppercased().hasSuffix(".SYSTEM") }?.name
+    }
+
     // MARK: Blank volumes
 
     /// Builds an empty ProDOS-order volume (not bootable: no boot loader or PRODOS file).
